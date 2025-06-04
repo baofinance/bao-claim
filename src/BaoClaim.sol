@@ -28,22 +28,20 @@ contract BaoClaim is Ownable, ReentrancyGuard {
     error NothingToSweep();
     error InvalidDates();
     error ClaimWindowActive();
-
-    /*//////////////////////////////////////////////////////////////////////////
-                                  CONSTANTS
-    //////////////////////////////////////////////////////////////////////////*/
-
-    uint256 public constant CLAIM_AMOUNT = 10581 * 1e18;
+    error CannotRecoverClaimToken();
+    error InvalidAddress();
+    error InvalidAmount();
 
     /*//////////////////////////////////////////////////////////////////////////
                                    STORAGE
     //////////////////////////////////////////////////////////////////////////*/
 
     bytes32 public merkleRoot;
-    IERC20 public token;
+    IERC20 public immutable token;
     uint256 public startDate;
     uint256 public endDate;
     address public multisig;
+    uint256 public claimAmount;
     mapping(address => bool) public hasClaimed;
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -52,6 +50,8 @@ contract BaoClaim is Ownable, ReentrancyGuard {
 
     event Claimed(address indexed claimer);
     event Sweep(address indexed to, uint256 amount);
+    event ClaimAmountUpdated(uint256 newAmount);
+    event Recovered(address indexed token, uint256 amount);
 
     /*//////////////////////////////////////////////////////////////////////////
                                   CONSTRUCTOR
@@ -64,8 +64,9 @@ contract BaoClaim is Ownable, ReentrancyGuard {
      * @param _endDate Timestamp when claiming ends.
      * @param _multisig Address to receive unclaimed tokens after the claim period.
      * @param _token Address of claimable token.
+     * @param _claimAmount Claimable amount for each eligible address.
      */
-    constructor(bytes32 _merkleRoot, uint256 _startDate, uint256 _endDate, address _multisig, address _token)
+    constructor(bytes32 _merkleRoot, uint256 _startDate, uint256 _endDate, address _multisig, address _token, uint256 _claimAmount)
         Ownable(_multisig)
     {
         if (_startDate >= _endDate) revert InvalidDates();
@@ -74,6 +75,7 @@ contract BaoClaim is Ownable, ReentrancyGuard {
         startDate = _startDate;
         endDate = _endDate;
         multisig = _multisig;
+        claimAmount = _claimAmount;
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -86,7 +88,7 @@ contract BaoClaim is Ownable, ReentrancyGuard {
      */
     function claim(bytes32[] calldata merkleProof) external nonReentrant {
         if (block.timestamp < startDate) revert ClaimNotStarted();
-        if (block.timestamp > endDate) revert ClaimEnded();
+        if (block.timestamp >= endDate) revert ClaimEnded();
         if (hasClaimed[msg.sender]) revert AlreadyClaimed();
 
         bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
@@ -95,27 +97,50 @@ contract BaoClaim is Ownable, ReentrancyGuard {
 
         hasClaimed[msg.sender] = true;
 
-        if (token.balanceOf(address(this)) < CLAIM_AMOUNT) revert InsufficientBalance();
+        if (token.balanceOf(address(this)) < claimAmount) revert InsufficientBalance();
 
-        token.safeTransfer(msg.sender, CLAIM_AMOUNT);
+        token.safeTransfer(msg.sender, claimAmount);
         emit Claimed(msg.sender);
     }
 
+    function getClaimable(address user) external view returns (bool claimed, uint256 amount) {
+    return (hasClaimed[user], claimAmount);
+    }
+
     /*//////////////////////////////////////////////////////////////////////////
-                              SWEEP FUNCTION
+                              SWEEP AND RECOVERY FUNCTION
     //////////////////////////////////////////////////////////////////////////*/
 
     /**
      * @notice Allows the owner to sweep unclaimed tokens to the multisig after the claim period ends.
      */
     function sweep() external onlyOwner nonReentrant {
-        if (block.timestamp <= endDate) revert ClaimNotOver();
+        uint256 end = endDate;
+        if (block.timestamp <= end) revert ClaimNotOver();
 
         uint256 balance = token.balanceOf(address(this));
         if (balance == 0) revert NothingToSweep();
 
         token.safeTransfer(multisig, balance);
         emit Sweep(multisig, balance);
+    }
+
+    /**
+    * @notice Allows the owner to recover non-claim tokens accidentally sent to the contract,
+    * but only after the claim window has ended.
+    * @param _token The address of the token to recover.
+    */
+    function recoverySweep(address _token) external onlyOwner {
+        uint256 end = endDate;
+        if (block.timestamp <= end) revert ClaimNotOver();
+
+        if (_token == address(token)) revert CannotRecoverClaimToken();
+        
+        uint256 balance = IERC20(_token).balanceOf(address(this));
+        if (balance == 0) revert NothingToSweep();
+        
+        IERC20(_token).safeTransfer(multisig, balance);
+        emit Recovered(_token, balance);
     }
 
     /*//////////////////////////////////////////////////////////////////////////
@@ -131,6 +156,19 @@ contract BaoClaim is Ownable, ReentrancyGuard {
             revert ClaimWindowActive();
         }
         merkleRoot = _newRoot;
+    }
+
+    /**
+    * @notice Updates the claimable amount.
+    * @param _claimAmount New claim amount.
+    */
+    function setClaimAmount(uint256 _claimAmount) external onlyOwner {
+        if (_claimAmount == 0) revert InvalidAmount();
+        if (block.timestamp >= startDate && block.timestamp <= endDate) {
+            revert ClaimWindowActive();
+        }
+        claimAmount = _claimAmount;
+        emit ClaimAmountUpdated(_claimAmount);
     }
 
     /**
@@ -152,6 +190,7 @@ contract BaoClaim is Ownable, ReentrancyGuard {
      * @param _multisig New multisig address.
      */
     function setMultisig(address _multisig) external onlyOwner {
+        if (_multisig == address(0)) revert InvalidAddress();
         multisig = _multisig;
     }
 }

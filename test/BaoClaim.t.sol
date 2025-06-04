@@ -20,7 +20,7 @@ contract BaoClaimTest is Test {
         uint256 start = block.timestamp + 2 days;
         uint256 end = start + 7 days;
 
-        claimContract = new BaoClaim(root, start, end, multisig, address(token));
+        claimContract = new BaoClaim(root, start, end, multisig, address(token), 10_581e18);
         token.mint(address(claimContract), initialSupply);
 
         proof.push(0x8e7e55115e8d71696d6ebf2269585e9f05c5ab1b926aa25f3181c6ac8301e879);
@@ -38,21 +38,14 @@ contract BaoClaimTest is Test {
         proof.push(0xf8dcc0dc0c92192090e12aa981fc2a764377399808fd6cc2307fda40cb7bff5f);
     }
 
-    function testPrintRoot() public {
-        //console.log("Merkle Root:");
-        //console.logBytes32(claimContract.merkleRoot());
-    }
-
     function testCanClaim() public {
         vm.warp(claimContract.startDate() + 1);
         vm.prank(claimer);
         claimContract.claim(proof);
 
-        uint256 claimed = claimContract.CLAIM_AMOUNT();
+        uint256 claimed = claimContract.claimAmount();
         assertEq(token.balanceOf(claimer), claimed);
         assertTrue(claimContract.hasClaimed(claimer));
-
-        //console.log("Claim successful for", claimed / 1e18, "tokens");
     }
 
     function testCannotClaimTwice() public {
@@ -61,13 +54,10 @@ contract BaoClaimTest is Test {
         vm.prank(claimer);
         claimContract.claim(proof);
 
-        uint256 claimed = claimContract.CLAIM_AMOUNT();
+        uint256 claimed = claimContract.claimAmount();
         assertEq(token.balanceOf(claimer), claimed);
         assertTrue(claimContract.hasClaimed(claimer));
-        //console.log("First claim successful for", claimed / 1e18, "tokens");
 
-        //console.log("Expecting revert with AlreadyClaimed selector:");
-        //console.logBytes4(BaoClaim.AlreadyClaimed.selector);
         vm.expectRevert(BaoClaim.AlreadyClaimed.selector);
         vm.prank(claimer);
         claimContract.claim(proof);
@@ -75,12 +65,9 @@ contract BaoClaimTest is Test {
 
     function testRevertsBeforeStart() public {
         uint256 futureStart = block.timestamp + 1 days;
-        BaoClaim futureClaim = new BaoClaim(root, futureStart, futureStart + 7 days, multisig, address(token));
-
+        BaoClaim futureClaim = new BaoClaim(root, futureStart, futureStart + 7 days, multisig, address(token), 10_581e18);
         token.mint(address(futureClaim), initialSupply);
 
-        //console.log("Expecting revert with ClaimNotStarted selector:");
-        //console.logBytes4(BaoClaim.ClaimNotStarted.selector);
         vm.expectRevert(BaoClaim.ClaimNotStarted.selector);
         vm.prank(claimer);
         futureClaim.claim(proof);
@@ -88,8 +75,6 @@ contract BaoClaimTest is Test {
 
     function testCannotSweepEarly() public {
         vm.prank(multisig);
-        //console.log("Expecting revert with ClaimNotOver selector:");
-        //console.logBytes4(BaoClaim.ClaimNotOver.selector);
         vm.expectRevert(BaoClaim.ClaimNotOver.selector);
         claimContract.sweep();
     }
@@ -104,8 +89,6 @@ contract BaoClaimTest is Test {
 
         uint256 afterSweep = token.balanceOf(multisig);
         assertGt(afterSweep, beforeSweep);
-
-        //console.log("Sweeped successful for", afterSweep / 1e18, "tokens");
     }
 
     function testSetMerkleRootBeforeOrAfterClaimWindow() public {
@@ -113,16 +96,11 @@ contract BaoClaimTest is Test {
         vm.prank(multisig);
         claimContract.setMerkleRoot(newRoot);
         assertEq(claimContract.merkleRoot(), newRoot);
-
-        //console.log("Successfully set new root:");
-        //console.logBytes32(newRoot);
     }
 
     function testSetMerkleRootDuringClaimWindowReverts() public {
         vm.warp(claimContract.startDate() + 1);
         vm.prank(multisig);
-        //console.log("Expecting revert with ClaimWindowActive selector:");
-        //console.logBytes4(BaoClaim.ClaimWindowActive.selector);
         vm.expectRevert(BaoClaim.ClaimWindowActive.selector);
         claimContract.setMerkleRoot(keccak256("fail root"));
     }
@@ -134,21 +112,70 @@ contract BaoClaimTest is Test {
         claimContract.setDates(newStart, newEnd);
         assertEq(claimContract.startDate(), newStart);
         assertEq(claimContract.endDate(), newEnd);
-
-        //console.log("Successfully set new startDate and endDate:");
-        //console.log("startDate:");
-        //console.logUint(newStart);
-        //console.log("endDate:");
-        //console.logUint(newEnd);
     }
 
     function testSetDatesDuringClaimWindowReverts() public {
         vm.warp(claimContract.startDate() + 1);
         vm.prank(multisig);
-        //console.log("Expecting revert with ClaimWindowActive selector:");
-        //console.logBytes4(BaoClaim.ClaimWindowActive.selector);
         vm.expectRevert(BaoClaim.ClaimWindowActive.selector);
         claimContract.setDates(block.timestamp + 3 days, block.timestamp + 10 days);
+    }
+
+    function testCanRecoverNonClaimTokenAfterEnd() public {
+        MockERC20 foreignToken = new MockERC20();
+        foreignToken.mint(address(claimContract), 1_000e18);
+
+        vm.warp(claimContract.endDate() + 1);
+        uint256 before = foreignToken.balanceOf(multisig);
+
+        vm.prank(multisig);
+        claimContract.recoverySweep(address(foreignToken));
+
+        uint256 after_ = foreignToken.balanceOf(multisig);
+        assertEq(after_, before + 1_000e18);
+    }
+
+    function testCannotRecoverClaimToken() public {
+        vm.warp(claimContract.endDate() + 1);
+        vm.prank(multisig);
+        vm.expectRevert(BaoClaim.CannotRecoverClaimToken.selector);
+        claimContract.recoverySweep(address(token));
+    }
+
+    function testCannotRecoverBeforeEnd() public {
+        MockERC20 foreignToken = new MockERC20();
+        foreignToken.mint(address(claimContract), 1_000e18);
+
+        vm.prank(multisig);
+        vm.expectRevert(BaoClaim.ClaimNotOver.selector);
+        claimContract.recoverySweep(address(foreignToken));
+    }
+
+    function testSetClaimAmountBeforeWindow() public {
+        uint256 newAmount = 1_234e18;
+        vm.prank(multisig);
+        claimContract.setClaimAmount(newAmount);
+        assertEq(claimContract.claimAmount(), newAmount);
+    }
+
+    function testSetClaimAmountDuringWindowReverts() public {
+        vm.warp(claimContract.startDate() + 1);
+        vm.prank(multisig);
+        vm.expectRevert(BaoClaim.ClaimWindowActive.selector);
+        claimContract.setClaimAmount(1_234e18);
+    }
+
+    function testGetClaimableView() public {
+        (bool claimed, uint256 amount) = claimContract.getClaimable(claimer);
+        assertEq(claimed, false);
+        assertEq(amount, claimContract.claimAmount());
+
+        vm.warp(claimContract.startDate() + 1);
+        vm.prank(claimer);
+        claimContract.claim(proof);
+
+        (claimed, ) = claimContract.getClaimable(claimer);
+        assertEq(claimed, true);
     }
 }
 
