@@ -4,9 +4,19 @@ out = "out"
 libs = ["lib"]
 test = "test"
 cache_path = "cache"
-solc_version = "0.8.28"
+solc_version = "0.8.30"
+auto_detect_remappings = false
 
 remappings = [
+  "ds-test/=lib/forge-std/lib/ds-test/src/",
+  "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/contracts/=lib/bao-base/lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/",
+  "@openzeppelin/contracts-upgradeable/=lib/bao-base/lib/openzeppelin-contracts-upgradeable/contracts/",
+  "@solady/=lib/bao-base/lib/solady/src/",
+  "@bao/=lib/bao-base/src/",
+  "@tide/=src/tide/",
+  "@tide-test/=test/tide/",
+  "@tide-test-mocks/=test/mocks/",
   "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"
 ]
 

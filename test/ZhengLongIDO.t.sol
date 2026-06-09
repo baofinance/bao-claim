@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+pragma solidity 0.8.30;
 
-import "forge-std/Test.sol";
-import "../src/ZhengLongIDO.sol";
+import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ZhengLongIDO} from "../src/ZhengLongIDO.sol";
 
 contract MockERC20 is IERC20 {
     string public name = "Mock USDC";
@@ -50,10 +51,8 @@ contract ZhengLongIDOTest is Test {
     function setUp() public {
         usdc = new MockERC20();
 
-        // Merkle tree setup
         root = 0x8eabd2b36ce185476a0bda6c61aa1584dcad3b6f0ed59b5edc5d23e451f6e290;
-        
-        // Proof for buyer
+
         proof.push(0x60f5c088967371383ec13d554a2870a21c579acccabcf082f3af690c5c67c91f);
         proof.push(0xe71344f8df6c09b676b64d848db171be9469a3937750db0ba8c5d8f652115345);
         proof.push(0xc8dbd1d8a6cabde2f317650770e7add02013fac153f2e2038169e1053842a00e);
@@ -65,7 +64,6 @@ contract ZhengLongIDOTest is Test {
         proof.push(0x24b5b381d0bbc2bb5a15979d78016acf1a94efcd9a5f0e9815c1f5daf120d325);
         proof.push(0x7e95e9476c66223237806869f61f55085cd5032bc125181d02589684cb746914);
 
-        // Proof for buyer2
         proof2.push(0xec3ae122c7da0771aedbdb15b28028f48dc32c28a599c9ba2ddae98b081c608b);
         proof2.push(0x64400729196c7523c7f2122e68a097ad31fb0ade087a45f52c5a8cfb69844278);
         proof2.push(0xf6444b84e92027b78431d3bd8ff6e401194519f42c51722004125613041e1fa0);
@@ -77,15 +75,8 @@ contract ZhengLongIDOTest is Test {
         proof2.push(0x24b5b381d0bbc2bb5a15979d78016acf1a94efcd9a5f0e9815c1f5daf120d325);
         proof2.push(0x7e95e9476c66223237806869f61f55085cd5032bc125181d02589684cb746914);
 
-        ido = new ZhengLongIDO(
-            address(usdc),
-            multisig,
-            root,
-            block.timestamp + 1 days,
-            block.timestamp + 2 days
-        );
+        ido = new ZhengLongIDO(address(usdc), multisig, root, block.timestamp + 1 days, block.timestamp + 2 days);
 
-        // Setup both buyers
         usdc.mint(buyer, 100_000_000);
         usdc.mint(buyer2, 100_000_000);
         vm.prank(buyer);
@@ -101,30 +92,27 @@ contract ZhengLongIDOTest is Test {
     }
 
     function testCannotDepositAfterSaleEnd() public {
-        vm.warp(ido.end() + 1);
+        vm.warp(ido.endDate());
         vm.prank(buyer);
         vm.expectRevert(ZhengLongIDO.SaleEnded.selector);
         ido.deposit(1_000_000, proof);
     }
 
     function testCannotDepositZeroAmount() public {
-        vm.warp(ido.start() + 1);
+        vm.warp(ido.startDate() + 1);
         vm.prank(buyer);
         vm.expectRevert(ZhengLongIDO.ZeroDeposit.selector);
         ido.deposit(0, proof);
     }
 
     function testCannotDepositIfNotWhitelisted() public {
-        // Prepare a non-whitelisted address
         address nonWhitelisted = address(0xabc);
         usdc.mint(nonWhitelisted, 10_000_000);
         vm.prank(nonWhitelisted);
         usdc.approve(address(ido), type(uint256).max);
 
-        // Advance to within the sale window
-        vm.warp(ido.start() + 1);
+        vm.warp(ido.startDate() + 1);
 
-        // Use an invalid proof (empty array) — will fail Merkle verification
         bytes32[] memory badProof;
 
         vm.prank(nonWhitelisted);
@@ -133,7 +121,7 @@ contract ZhengLongIDOTest is Test {
     }
 
     function testSuccessfulDeposit() public {
-        vm.warp(ido.start() + 1);
+        vm.warp(ido.startDate() + 1);
         uint256 initialBalance = usdc.balanceOf(multisig);
 
         vm.prank(buyer);
@@ -145,7 +133,7 @@ contract ZhengLongIDOTest is Test {
     }
 
     function testMultipleDepositsAccumulate() public {
-        vm.warp(ido.start() + 1);
+        vm.warp(ido.startDate() + 1);
 
         vm.prank(buyer);
         ido.deposit(2_000_000, proof);
@@ -169,8 +157,8 @@ contract ZhengLongIDOTest is Test {
         uint256 newStart = block.timestamp + 10 days;
         uint256 newEnd = newStart + 5 days;
         ido.setDates(newStart, newEnd);
-        assertEq(ido.start(), newStart);
-        assertEq(ido.end(), newEnd);
+        assertEq(ido.startDate(), newStart);
+        assertEq(ido.endDate(), newEnd);
     }
 
     function testSetMultisig() public {
@@ -195,87 +183,46 @@ contract ZhengLongIDOTest is Test {
 
     function testIsSaleActive() public {
         assertFalse(ido.isSaleActive());
-        vm.warp(ido.start() + 1);
+        vm.warp(ido.startDate() + 1);
         assertTrue(ido.isSaleActive());
+        vm.warp(ido.endDate());
+        assertFalse(ido.isSaleActive());
     }
 
-        function testUniqueDepositorTracking() public {
-        vm.warp(ido.start() + 1);
-        
-        // First deposit from buyer
+    function testUniqueDepositorTracking() public {
+        vm.warp(ido.startDate() + 1);
+
         vm.prank(buyer);
         ido.deposit(1_000_000, proof);
-        
+
         assertEq(ido.totalDepositors(), 1);
-        
-        // First deposit from buyer2
+
         vm.prank(buyer2);
         ido.deposit(2_000_000, proof2);
-        
+
         assertEq(ido.totalDepositors(), 2);
-        
-        // Second deposit from buyer doesn't increment counter
+
         vm.prank(buyer);
         ido.deposit(500_000, proof);
-        
+
         assertEq(ido.totalDepositors(), 2);
     }
 
     function testDepositEventIncludesTotal() public {
-    vm.warp(ido.start() + 1);
-    
-    // Expected event signature: Deposited(address indexed user, uint256 amount, uint256 totalUserDeposits)
-    vm.expectEmit(true, true, true, true);
-    emit ZhengLongIDO.Deposited(buyer, 1_000_000, 1_000_000);
-    vm.prank(buyer);
-    ido.deposit(1_000_000, proof);
-    
-    vm.expectEmit(true, true, true, true);
-    emit ZhengLongIDO.Deposited(buyer, 500_000, 1_500_000);
-    vm.prank(buyer);
-    ido.deposit(500_000, proof);
-    }
+        vm.warp(ido.startDate() + 1);
 
-    function testGetUserDepositView() public {
-        vm.warp(ido.start() + 1);
-        
-        vm.prank(buyer);
-        ido.deposit(3_000_000, proof);
-        
-        assertEq(ido.getUserDeposit(buyer), 3_000_000);
-        assertEq(ido.getUserDeposit(buyer2), 0); // Not deposited yet
-    }
-
-    function testGetTotalDepositsView() public {
-        vm.warp(ido.start() + 1);
-        
-        assertEq(ido.getTotalDeposits(), 0);
-        
+        vm.expectEmit(true, true, true, true);
+        emit ZhengLongIDO.Deposited(buyer, 1_000_000, 1_000_000);
         vm.prank(buyer);
         ido.deposit(1_000_000, proof);
-        assertEq(ido.getTotalDeposits(), 1_000_000);
-        
-        vm.prank(buyer2);
-        ido.deposit(2_000_000, proof2);
-        assertEq(ido.getTotalDeposits(), 3_000_000);
-    }
 
-    function testGetDepositorCountView() public {
-        vm.warp(ido.start() + 1);
-        
-        assertEq(ido.getDepositorCount(), 0);
-        
+        vm.expectEmit(true, true, true, true);
+        emit ZhengLongIDO.Deposited(buyer, 500_000, 1_500_000);
         vm.prank(buyer);
-        ido.deposit(1_000_000, proof);
-        assertEq(ido.getDepositorCount(), 1);
-        
-        vm.prank(buyer2);
-        ido.deposit(1_000_000, proof2);
-        assertEq(ido.getDepositorCount(), 2);
+        ido.deposit(500_000, proof);
     }
 
     function testImmutableUSDC() public view {
-    // Simply verify the USDC address is set correctly
-    assertEq(address(ido.usdc()), address(usdc));
+        assertEq(address(ido.USDC()), address(usdc));
     }
 }

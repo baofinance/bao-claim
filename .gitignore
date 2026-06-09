@@ -2,6 +2,9 @@
 cache/
 out/
 
+# Local reference clones
+.tmp/
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
