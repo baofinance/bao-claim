@@ -23,6 +23,9 @@ import {IVotingEscrow} from "@tide/interfaces/IVotingEscrow.sol";
 ///      multisig may change, and only before `startDate`. The `_v1` suffix is a naming convention (harbor style),
 ///      not an upgradeable implementation slot. BAO is never held — it is forwarded to the multisig on each swap.
 ///      Standard ERC20 only (no fee-on-transfer / rebasing handling).
+///      Acknowledged: path-1 swaps round TIDE down (`baoToTide`), so up to a sub-wei (<1 wei TIDE) of value per swap
+///      is intentionally not credited (dust). This is accepted by design and is never refunded; the `MIN_TIDE_OUT`
+///      floor keeps any such rounding immaterial relative to the swap size.
 // solhint-disable-next-line contract-name-camelcase
 contract HarborTideDistributor_v1 is
     IHarborTideDistributor,
@@ -49,8 +52,9 @@ contract HarborTideDistributor_v1 is
     /// @notice Separate TIDE cap for path 3 (standard merkle) (30,000,000 TIDE).
     uint256 public constant MAX_TIDE_STANDARD = 30_000_000e18;
 
-    /// @notice Minimum TIDE output required for a path-1 swap (1,000 TIDE).
-    uint256 public constant MIN_TIDE_OUT = 1_000e18;
+    /// @notice Minimum TIDE output required for a path-1 swap (10 TIDE; ~57 BAO at the fixed rate).
+    /// @dev Anti-dust floor only; rounding loss is <=1 wei TIDE, so this is well above any rounding concern.
+    uint256 public constant MIN_TIDE_OUT = 10e18;
 
     /// @notice Fixed conversion rate numerator: 1 BAO -> 0.1758 TIDE = `TIDE_NUMERATOR / RATE_DENOMINATOR`.
     uint256 public constant TIDE_NUMERATOR = 1758;
@@ -174,6 +178,7 @@ contract HarborTideDistributor_v1 is
         if (block.timestamp >= endDate) revert ClaimEnded();
         if (baoAmount == 0) revert InvalidAmount();
 
+        // tideOut rounds down; any sub-wei remainder is acknowledged, uncredited dust (see baoToTide).
         uint256 tideOut = baoToTide(baoAmount);
         if (tideOut < MIN_TIDE_OUT) revert BelowMinSwap();
         if (totalBaoConverted + baoAmount > MAX_BAO) revert BaoCapExceeded();
@@ -266,6 +271,8 @@ contract HarborTideDistributor_v1 is
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHarborTideDistributor
+    /// @dev Rounds TIDE DOWN. Any fractional remainder (< 1 wei TIDE) is acknowledged dust: it is not credited to the
+    ///      swapper and not refunded. Rounding down (never up) ensures the contract can never over-distribute TIDE.
     function baoToTide(uint256 baoAmount) public pure returns (uint256) {
         return baoAmount * TIDE_NUMERATOR / RATE_DENOMINATOR;
     }

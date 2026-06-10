@@ -58,12 +58,12 @@ so the round-trip never over-credits a user.
 
 ### Worked example — minimum swap (path 1)
 
-`MIN_TIDE_OUT = 1000 TIDE`. The minimum BAO input is `tideToBao(1000e18)`:
+`MIN_TIDE_OUT = 10 TIDE`. The minimum BAO input is `tideToBao(10e18)`:
 
 | Input (wei) | `baoToTide` output (wei) | Result |
 |---|---|---|
-| `5688282138794084186576` (≈ 5688.2821 BAO) | `1000000000000000000000` (exactly 1000 TIDE) | accepted |
-| `5688282138794084186575` (one wei less) | `999999999999999999999` (< 1000 TIDE) | reverts `BelowMinSwap` |
+| `56882821387940841866` (≈ 56.8828 BAO) | `10000000000000000000` (exactly 10 TIDE) | accepted |
+| `56882821387940841865` (one wei less) | `9999999999999999999` (< 10 TIDE) | reverts `BelowMinSwap` |
 
 ### Worked example — veBAO snapshot (path 2)
 

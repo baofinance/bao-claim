@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 
 import {IBaoOwnable} from "@bao/interfaces/IBaoOwnable.sol";
 
@@ -87,6 +88,17 @@ contract HarborTideDistributorV1Test is Test {
         bao.approve(address(dist), amount);
     }
 
+    /// @dev Logs a labelled balance snapshot (user TIDE/BAO, multisig BAO, distributor TIDE pools).
+    function _logBalances(string memory label, address user) internal view {
+        console2.log(label);
+        console2.log("  user TIDE        :", tide.balanceOf(user));
+        console2.log("  user BAO         :", bao.balanceOf(user));
+        console2.log("  multisig BAO     :", bao.balanceOf(multisig));
+        console2.log("  dist TIDE balance:", tide.balanceOf(address(dist)));
+        console2.log("  totalTideSwapAndVe:", dist.totalTideSwapAndVe());
+        console2.log("  totalTideStandard :", dist.totalTideStandard());
+    }
+
     /*//////////////////////////////////////////////////////////////
                           PATH 1 — SWAP
     //////////////////////////////////////////////////////////////*/
@@ -97,8 +109,13 @@ contract HarborTideDistributorV1Test is Test {
         _fundBao(alice, baoIn);
         _enterWindow();
 
+        console2.log("convertBao: baoIn =", baoIn, "expected TIDE out =", expectedTide);
+        _logBalances("convertBao BEFORE", alice);
+
         vm.prank(alice);
         dist.convertBao(baoIn);
+
+        _logBalances("convertBao AFTER", alice);
 
         assertEq(tide.balanceOf(alice), expectedTide);
         assertEq(bao.balanceOf(multisig), baoIn, "BAO forwarded to multisig in same tx");
@@ -157,8 +174,13 @@ contract HarborTideDistributorV1Test is Test {
     function testClaimVeBaoHappyPath() public {
         _enterWindow();
 
+        console2.log("claimVeBao: tideAmount =", VE_TIDE);
+        _logBalances("claimVeBao BEFORE", alice);
+
         vm.prank(alice);
         dist.claimVeBao(VE_TIDE, _emptyProof());
+
+        _logBalances("claimVeBao AFTER", alice);
 
         assertEq(tide.balanceOf(alice), VE_TIDE);
         assertTrue(dist.hasClaimedVeBao(alice));
@@ -293,8 +315,14 @@ contract HarborTideDistributorV1Test is Test {
 
     function testClaimStandardHappyPath() public {
         _enterWindow();
+
+        console2.log("claimStandard: tideAmount =", STD_TIDE);
+        _logBalances("claimStandard BEFORE", alice);
+
         vm.prank(alice);
         dist.claimStandard(STD_TIDE, _emptyProof());
+
+        _logBalances("claimStandard AFTER", alice);
 
         assertEq(tide.balanceOf(alice), STD_TIDE);
         assertTrue(dist.hasClaimedStandard(alice));
@@ -372,14 +400,92 @@ contract HarborTideDistributorV1Test is Test {
         _fundBao(alice, baoIn);
         _enterWindow();
 
+        _logBalances("allPaths BEFORE", alice);
+
         vm.startPrank(alice);
         dist.convertBao(baoIn);
+        _logBalances("allPaths AFTER convertBao", alice);
         dist.claimVeBao(VE_TIDE, _emptyProof());
+        _logBalances("allPaths AFTER claimVeBao", alice);
         dist.claimStandard(STD_TIDE, _emptyProof());
+        _logBalances("allPaths AFTER claimStandard", alice);
         vm.stopPrank();
 
         assertEq(tide.balanceOf(alice), expectedSwap + VE_TIDE + STD_TIDE);
         assertEq(dist.totalTideSwapAndVe(), expectedSwap + VE_TIDE);
+        assertEq(dist.totalTideStandard(), STD_TIDE);
+    }
+
+    /// @dev Full single-user lifecycle exercising every path and its one-shot / min-swap guards in sequence.
+    function testMultiStepUserLifecycle() public {
+        uint256 swap1 = 600_000e18;
+        uint256 swap2 = 400_000e18;
+        uint256 minBao = dist.tideToBao(dist.MIN_TIDE_OUT());
+        uint256 swap3 = 250_000e18; // final above-min swap
+        uint256 totalBao = swap1 + swap2 + minBao + swap3;
+
+        _fundBao(alice, totalBao);
+        _enterWindow();
+
+        uint256 expectedSwapTide =
+            dist.baoToTide(swap1) + dist.baoToTide(swap2) + dist.baoToTide(minBao) + dist.baoToTide(swap3);
+
+        _logBalances("lifecycle BEFORE", alice);
+
+        // 1) swap BAO -> TIDE multiple times (each above min swap)
+        vm.prank(alice);
+        dist.convertBao(swap1);
+        _logBalances("lifecycle AFTER swap #1", alice);
+
+        vm.prank(alice);
+        dist.convertBao(swap2);
+        _logBalances("lifecycle AFTER swap #2", alice);
+
+        uint256 tideAfterSwaps = tide.balanceOf(alice);
+        assertEq(tideAfterSwaps, dist.baoToTide(swap1) + dist.baoToTide(swap2));
+
+        // 2) claim veBAO (success)
+        vm.prank(alice);
+        dist.claimVeBao(VE_TIDE, _emptyProof());
+        _logBalances("lifecycle AFTER veClaim", alice);
+        assertTrue(dist.hasClaimedVeBao(alice));
+        assertEq(tide.balanceOf(alice), tideAfterSwaps + VE_TIDE);
+
+        // 3) claim standard (success)
+        vm.prank(alice);
+        dist.claimStandard(STD_TIDE, _emptyProof());
+        _logBalances("lifecycle AFTER standardClaim", alice);
+        assertTrue(dist.hasClaimedStandard(alice));
+        assertEq(tide.balanceOf(alice), tideAfterSwaps + VE_TIDE + STD_TIDE);
+
+        // 4) claim veBAO again -> revert (one-shot)
+        vm.prank(alice);
+        vm.expectRevert(IHarborTideDistributorErrors.AlreadyClaimed.selector);
+        dist.claimVeBao(VE_TIDE, _emptyProof());
+
+        // 5) claim standard again -> revert (one-shot)
+        vm.prank(alice);
+        vm.expectRevert(IHarborTideDistributorErrors.AlreadyClaimed.selector);
+        dist.claimStandard(STD_TIDE, _emptyProof());
+
+        // 6) swap below min swap -> revert
+        vm.prank(alice);
+        vm.expectRevert(IHarborTideDistributorErrors.BelowMinSwap.selector);
+        dist.convertBao(minBao - 1);
+
+        // 7) final swap above min swap (success)
+        vm.prank(alice);
+        dist.convertBao(minBao);
+        vm.prank(alice);
+        dist.convertBao(swap3);
+        _logBalances("lifecycle AFTER final swaps", alice);
+
+        // final accounting: all BAO spent, TIDE = every successful swap + both claims
+        assertEq(bao.balanceOf(alice), 0, "all BAO converted");
+        assertEq(bao.balanceOf(multisig), totalBao, "all BAO forwarded to multisig");
+        assertEq(tide.balanceOf(alice), expectedSwapTide + VE_TIDE + STD_TIDE);
+        assertEq(dist.totalBaoConverted(), totalBao);
+        assertEq(dist.totalTideSwapAndVe(), expectedSwapTide + VE_TIDE);
         assertEq(dist.totalTideStandard(), STD_TIDE);
     }
 
@@ -388,6 +494,76 @@ contract HarborTideDistributorV1Test is Test {
         vm.prank(configOps);
         dist.setVeBaoMerkleRoot(newRoot);
         assertEq(dist.veBaoMerkleRoot(), newRoot);
+    }
+
+    function testOwnerCanGrantAdditionalConfigAddress() public {
+        uint256 configRole = dist.CONFIG_ROLE();
+
+        // bob starts with no config powers and cannot set roots
+        assertFalse(dist.hasAnyRole(bob, configRole));
+        vm.prank(bob);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        dist.setStandardMerkleRoot(keccak256("bob root"));
+
+        // owner (multisig) grants CONFIG_ROLE to an additional address
+        vm.prank(multisig);
+        dist.grantRoles(bob, configRole);
+        assertTrue(dist.hasAnyRole(bob, configRole));
+
+        // the newly added config address can now update BOTH merkle roots before start
+        bytes32 newStandardRoot = keccak256("bob standard root");
+        bytes32 newVeRoot = keccak256("bob ve root");
+        vm.startPrank(bob);
+        dist.setStandardMerkleRoot(newStandardRoot);
+        dist.setVeBaoMerkleRoot(newVeRoot);
+        vm.stopPrank();
+        assertEq(dist.standardMerkleRoot(), newStandardRoot);
+        assertEq(dist.veBaoMerkleRoot(), newVeRoot);
+
+        // ...but the additional config address CANNOT sweep (owner-only)
+        vm.warp(endDate + 1);
+        vm.prank(bob);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        dist.sweep();
+
+        // ...nor recover stray tokens (owner-only)
+        vm.prank(bob);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        dist.recoverySweep(address(bao));
+
+        // the original config address still works (roles are additive)
+        assertTrue(dist.hasAnyRole(configOps, configRole));
+    }
+
+    function testOwnerCanGrantConfigRoleAfterStart() public {
+        uint256 configRole = dist.CONFIG_ROLE();
+        _enterWindow();
+
+        // granting roles is owner-only but NOT time-gated: it still works after start
+        vm.prank(multisig);
+        dist.grantRoles(bob, configRole);
+        assertTrue(dist.hasAnyRole(bob, configRole));
+
+        // ...but config actions are locked once the window has opened
+        vm.prank(bob);
+        vm.expectRevert(IHarborTideDistributorErrors.ConfigLocked.selector);
+        dist.setStandardMerkleRoot(keccak256("too late"));
+    }
+
+    function testNonOwnerCannotGrantConfigRole() public {
+        uint256 configRole = dist.CONFIG_ROLE();
+
+        // a config-role holder is not the owner and cannot grant roles
+        vm.prank(configOps);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        dist.grantRoles(bob, configRole);
+
+        // a random account likewise cannot
+        vm.prank(alice);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        dist.grantRoles(bob, configRole);
+
+        assertFalse(dist.hasAnyRole(bob, configRole));
     }
 
     function testSetRootRevertsAfterStart() public {
