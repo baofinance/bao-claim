@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
@@ -165,6 +165,40 @@ contract HarborTideDistributorV1Test is Test {
         vm.prank(alice);
         vm.expectRevert(IHarborTideDistributorErrors.ClaimEnded.selector);
         dist.convertBao(baoIn);
+    }
+
+    function testConvertBaoRevertsInvalidAmount() public {
+        _enterWindow();
+
+        vm.prank(alice);
+        vm.expectRevert(IHarborTideDistributorErrors.InvalidAmount.selector);
+        dist.convertBao(0);
+    }
+
+    function testConvertBaoRevertsInsufficientBalance() public {
+        uint256 smallFunding = 100e18;
+        HarborTideDistributor_v1 underfunded = new HarborTideDistributor_v1(
+            address(tide),
+            address(bao),
+            address(ve),
+            startDate,
+            endDate,
+            SNAPSHOT_BLOCK,
+            multisig,
+            _leaf(alice, VE_TIDE),
+            _leaf(alice, STD_TIDE)
+        );
+        tide.mint(address(underfunded), smallFunding);
+
+        uint256 baoIn = 1_000_000e18;
+        bao.mint(alice, baoIn);
+        vm.startPrank(alice);
+        bao.approve(address(underfunded), baoIn);
+        _enterWindow();
+
+        vm.expectRevert(IHarborTideDistributorErrors.InsufficientBalance.selector);
+        underfunded.convertBao(baoIn);
+        vm.stopPrank();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -618,6 +652,16 @@ contract HarborTideDistributorV1Test is Test {
         dist.sweep();
     }
 
+    function testSweepRevertsNothingToSweep() public {
+        vm.warp(endDate + 1);
+        vm.prank(multisig);
+        dist.sweep();
+
+        vm.prank(multisig);
+        vm.expectRevert(IHarborTideDistributorErrors.NothingToSweep.selector);
+        dist.sweep();
+    }
+
     function testRecoverySweepRevertsOnTide() public {
         vm.warp(endDate + 1);
         vm.prank(multisig);
@@ -671,6 +715,16 @@ contract HarborTideDistributorV1Test is Test {
     function testConversionRoundTrip() public view {
         // tideToBao rounds up, so round-trip never under-delivers TIDE
         assertGe(dist.baoToTide(dist.tideToBao(VE_TIDE)), VE_TIDE);
+    }
+
+    function testFuzz_RoundTripNeverOverCredits(uint256 baoAmount) public view {
+        baoAmount = bound(baoAmount, 0, type(uint128).max);
+
+        uint256 tideOut = dist.baoToTide(baoAmount);
+        assertLe(dist.tideToBao(tideOut), baoAmount);
+
+        // baoToTide floors, so output never exceeds the exact rational rate
+        assertLe(tideOut, (baoAmount * dist.TIDE_NUMERATOR()) / dist.RATE_DENOMINATOR());
     }
 
     function testSupportsInterface() public view {

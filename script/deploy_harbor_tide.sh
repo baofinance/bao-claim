@@ -15,15 +15,23 @@
 #
 # After deploy: fund the contract with up to 280,000,000 TIDE
 #   (<=250m shared across paths 1+2, <=30m for path 3).
+#
+# REQUIRED before broadcast — do not deploy with placeholder zeros:
+#   TIDE, BAO, START_DATE, END_DATE, VE_MERKLE_ROOT, STANDARD_MERKLE_ROOT
 
 # Set your constructor arguments
+# TODO: set mainnet TIDE token address before deploy
 TIDE="0x0000000000000000000000000000000000000000"
+# TODO: set mainnet BAO token address before deploy
 BAO="0x0000000000000000000000000000000000000000"
+# Verify this is the live mainnet veBAO voting escrow before broadcasting
 VEBAO="0x8bf70dfe40f07a5ab715f7e888478d9d3680a2b6"
+# TODO: set claim window open timestamp (must be after block 25,000,000)
 START_DATE="0"
+# TODO: set claim window close timestamp
 END_DATE="0"
 SNAPSHOT_BLOCK="25000000"
-MULTISIG="0x3dFc49e5112005179Da613BdE5973229082dAc35"
+MULTISIG="0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2"
 VE_MERKLE_ROOT="0x0000000000000000000000000000000000000000000000000000000000000000"
 STANDARD_MERKLE_ROOT="0x0000000000000000000000000000000000000000000000000000000000000000"
 
