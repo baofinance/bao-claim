@@ -4,8 +4,8 @@ pragma solidity 0.8.30;
 /// @title IVotingEscrow
 /// @notice Minimal external interface for the veBAO voting escrow (`0x8bf70dfe40f07a5ab715f7e888478d9d3680a2b6`).
 /// @dev Only the read functions consumed by {HarborTideDistributor_v1} path 2 are declared. veBAO is a
-///      Curve-style voting escrow: `locked` returns the raw locked BAO (`int128 amount`) and lock end, while
-///      `balanceOfAt` returns the decaying voting power at a historical block (the BAO-equivalent snapshot).
+///      Curve-style voting escrow: `locked` returns the raw locked BAO (`int128 amount`) and lock end.
+///      Path 2 gates on `locked` only; `balanceOfAt` is retained for integrators querying ve power.
 interface IVotingEscrow {
     /// @notice Curve-style locked balance record.
     /// @dev `amount` is the raw locked BAO (signed in the source contract, always non-negative in practice).

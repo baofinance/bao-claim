@@ -48,10 +48,8 @@ interface IHarborTideDistributorErrors {
 
     /// @notice The veBAO lock ends at or before `endDate` (`locked__end <= endDate`).
     error LockEndTooEarly();
-    /// @notice The BAO-equivalent snapshot (`balanceOfAt`) is below the amount required for the merkle allocation.
-    error InsufficientSnapshotBalance();
-    /// @notice The current locked BAO is below the BAO-equivalent snapshot (position no longer backs the snapshot).
-    error LockBelowSnapshot();
+    /// @notice Current `locked.amount` is below the BAO equivalent of the merkle allocation (`tideToBao(tideAmount)`).
+    error InsufficientLocked();
 
     /*//////////////////////////////////////////////////////////////
                             PATH 3 — STANDARD

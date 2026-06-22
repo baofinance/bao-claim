@@ -53,7 +53,6 @@ contract HarborTideDistributorHandler is Test {
         tide.mint(address(dist), FUNDING);
         tideFunded = FUNDING;
 
-        ve.setSnapshot(actor, 10_000_000e18);
         ve.setLocked(actor, int128(uint128(12_000_000e18)), endDate + 30 days);
 
         vm.warp(startDate + 1);

@@ -82,7 +82,7 @@ contract HarborTideDistributor_v1 is
     uint256 public immutable endDate;
 
     /// @notice Block number of the veBAO eligibility snapshot (expected 25,000,000 on mainnet).
-    /// @dev Path-2 claims revert until `block.number >= SNAPSHOT_BLOCK` so `balanceOfAt` is well-defined.
+    /// @dev Path-2 claims revert until `block.number >= SNAPSHOT_BLOCK` (coordination with off-chain merkle build).
     uint256 public immutable SNAPSHOT_BLOCK;
 
     /*//////////////////////////////////////////////////////////////
@@ -213,10 +213,9 @@ contract HarborTideDistributor_v1 is
         // Lock must extend strictly past the distributor window (still active at claim time).
         if (VEBAO.locked__end(msg.sender) <= endDate) revert LockEndTooEarly();
 
-        // BAO-equivalent snapshot must cover the merkle allocation, and the live lock must still back it.
-        uint256 snapshotBaoEquivalent = VEBAO.balanceOfAt(msg.sender, SNAPSHOT_BLOCK);
-        if (snapshotBaoEquivalent < tideToBao(tideAmount)) revert InsufficientSnapshotBalance();
-        if (_lockedAmount(msg.sender) < snapshotBaoEquivalent) revert LockBelowSnapshot();
+        // Live locked BAO must cover the BAO equivalent of the merkle allocation (anti-withdraw / double-dip).
+        uint256 baoRequired = tideToBao(tideAmount);
+        if (_lockedAmount(msg.sender) < baoRequired) revert InsufficientLocked();
 
         if (totalTideSwapAndVe + tideAmount > MAX_TIDE_SWAP_AND_VE) revert TideSwapVeCapExceeded();
         if (TIDE.balanceOf(address(this)) < tideAmount) revert InsufficientBalance();
@@ -232,15 +231,13 @@ contract HarborTideDistributor_v1 is
     function getVeClaimStatus(address user, uint256 tideAmount) external view returns (VeClaimStatus memory status) {
         status.veEnd = VEBAO.locked__end(user);
         status.lockedAmount = _lockedAmount(user);
-        status.snapshotBaoEquivalent = VEBAO.balanceOfAt(user, SNAPSHOT_BLOCK);
-        status.snapshotRequired = tideToBao(tideAmount);
+        status.baoRequired = tideToBao(tideAmount);
         status.minUnlockTime = endDate + 1;
         status.alreadyClaimed = hasClaimedVeBao[user];
         status.poolCapAvailable = totalTideSwapAndVe + tideAmount <= MAX_TIDE_SWAP_AND_VE;
         status.canClaimNow = block.number >= SNAPSHOT_BLOCK && !status.alreadyClaimed && block.timestamp >= startDate
-            && block.timestamp < endDate && status.veEnd > endDate
-            && status.snapshotBaoEquivalent >= status.snapshotRequired
-            && status.lockedAmount >= status.snapshotBaoEquivalent && status.poolCapAvailable;
+            && block.timestamp < endDate && status.veEnd > endDate && status.lockedAmount >= status.baoRequired
+            && status.poolCapAvailable;
     }
 
     /*//////////////////////////////////////////////////////////////

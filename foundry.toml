@@ -20,4 +20,16 @@ remappings = [
   "openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/"
 ]
 
+fs_permissions = [
+  { access = "read", path = "./" },
+  { access = "read-write", path = "./deployments" },
+]
+
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC_URL}"
+local = "${LOCAL_URL}"
+
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

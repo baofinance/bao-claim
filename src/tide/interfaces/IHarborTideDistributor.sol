@@ -37,8 +37,7 @@ interface IHarborTideDistributor {
     struct VeClaimStatus {
         uint256 veEnd; // veBAO `locked__end(user)`
         uint256 lockedAmount; // current locked BAO (uint256 cast of `locked(user).amount`)
-        uint256 snapshotBaoEquivalent; // veBAO `balanceOfAt(user, SNAPSHOT_BLOCK)`
-        uint256 snapshotRequired; // `tideToBao(tideAmount)`, rounded up
+        uint256 baoRequired; // `tideToBao(tideAmount)`, rounded up
         uint256 minUnlockTime; // `endDate + 1` (strict `veEnd > endDate` extend-lock hint)
         bool canClaimNow; // all `claimVeBao` checks pass except the merkle proof
         bool alreadyClaimed; // `hasClaimedVeBao(user)`
@@ -60,9 +59,10 @@ interface IHarborTideDistributor {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Path 2: claim TIDE for an eligible veBAO position during the claim window.
-    /// @dev The leaf is `(msg.sender, tideAmount)`. Requires `veEnd > endDate`, a sufficient BAO-equivalent
-    ///      snapshot, and a current lock that still backs that snapshot. Pays `tideAmount` (authoritative
-    ///      from the leaf). Independent of paths 1 and 3.
+    /// @dev The leaf is `(msg.sender, tideAmount)`. Requires `veEnd > endDate` and current `locked.amount`
+    ///      >= `tideToBao(tideAmount)`. The merkle caps each user's max TIDE from the off-chain snapshot of
+    ///      raw locked BAO at `SNAPSHOT_BLOCK`; the live lock check ensures they have not withdrawn below
+    ///      what they are claiming. Pays `tideAmount` (authoritative from the leaf). Independent of paths 1 and 3.
     /// @param tideAmount The TIDE allocation encoded in the caller's merkle leaf.
     /// @param proof The merkle proof for `(msg.sender, tideAmount)` against `veBaoMerkleRoot`.
     function claimVeBao(uint256 tideAmount, bytes32[] calldata proof) external;

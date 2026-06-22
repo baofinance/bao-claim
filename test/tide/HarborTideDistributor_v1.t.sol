@@ -57,8 +57,7 @@ contract HarborTideDistributorV1Test is Test {
 
         tide.mint(address(dist), FUNDING);
 
-        // default eligible veBAO position for alice
-        ve.setSnapshot(alice, 10_000_000e18);
+        // default eligible veBAO position for alice (merkle leaf VE_TIDE; locked covers tideToBao(VE_TIDE))
         ve.setLocked(alice, int128(uint128(12_000_000e18)), endDate + 30 days);
 
         uint256 configRole = dist.CONFIG_ROLE();
@@ -228,8 +227,7 @@ contract HarborTideDistributorV1Test is Test {
         assertTrue(s.canClaimNow);
         assertEq(s.veEnd, endDate + 30 days);
         assertEq(s.lockedAmount, 12_000_000e18);
-        assertEq(s.snapshotBaoEquivalent, 10_000_000e18);
-        assertEq(s.snapshotRequired, dist.tideToBao(VE_TIDE));
+        assertEq(s.baoRequired, dist.tideToBao(VE_TIDE));
         assertEq(s.minUnlockTime, endDate + 1);
         assertFalse(s.alreadyClaimed);
         assertTrue(s.poolCapAvailable);
@@ -254,18 +252,19 @@ contract HarborTideDistributorV1Test is Test {
         dist.claimVeBao(VE_TIDE, _emptyProof());
     }
 
-    function testClaimVeBaoRevertsWhenLockedBelowSnapshot() public {
-        ve.setLocked(alice, int128(uint128(9_999_999e18)), endDate + 30 days); // below snapshot (10m)
+    function testClaimVeBaoRevertsWhenInsufficientLocked() public {
+        uint256 baoRequired = dist.tideToBao(VE_TIDE);
+        ve.setLocked(alice, int128(uint128(baoRequired - 1)), endDate + 30 days);
         _enterWindow();
 
         vm.prank(alice);
-        vm.expectRevert(IHarborTideDistributorErrors.LockBelowSnapshot.selector);
+        vm.expectRevert(IHarborTideDistributorErrors.InsufficientLocked.selector);
         dist.claimVeBao(VE_TIDE, _emptyProof());
     }
 
-    function testClaimVeBaoSucceedsWhenLockedAboveSnapshot() public {
-        // partial withdraw scenario: locked dropped but still >= snapshot -> allowed by design
-        ve.setLocked(alice, int128(uint128(10_000_000e18)), endDate + 30 days); // exactly snapshot
+    function testClaimVeBaoSucceedsWhenLockedExactlyCoversClaim() public {
+        uint256 baoRequired = dist.tideToBao(VE_TIDE);
+        ve.setLocked(alice, int128(uint128(baoRequired)), endDate + 30 days);
         _enterWindow();
 
         vm.prank(alice);
@@ -273,13 +272,18 @@ contract HarborTideDistributorV1Test is Test {
         assertEq(tide.balanceOf(alice), VE_TIDE);
     }
 
-    function testClaimVeBaoRevertsWhenSnapshotInsufficient() public {
-        ve.setSnapshot(alice, dist.tideToBao(VE_TIDE) - 1); // below required
+    function testClaimVeBaoSucceedsDespiteLowBalanceOfAt() public {
+        // Merkle is sized from locked BAO, not decaying balanceOfAt — low ve power must not block a valid claim.
+        ve.setSnapshot(alice, 0);
+        ve.setLocked(alice, int128(uint128(12_000_000e18)), endDate + 30 days);
         _enterWindow();
 
+        IHarborTideDistributor.VeClaimStatus memory s = dist.getVeClaimStatus(alice, VE_TIDE);
+        assertTrue(s.canClaimNow);
+
         vm.prank(alice);
-        vm.expectRevert(IHarborTideDistributorErrors.InsufficientSnapshotBalance.selector);
         dist.claimVeBao(VE_TIDE, _emptyProof());
+        assertEq(tide.balanceOf(alice), VE_TIDE);
     }
 
     function testClaimVeBaoRevertsBeforeSnapshotBlock() public {

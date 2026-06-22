@@ -67,46 +67,47 @@ so the round-trip never over-credits a user.
 
 ### Worked example — veBAO snapshot (path 2)
 
-The path-2 merkle is built **off-chain from the BAO-equivalent snapshot** (`balanceOfAt`), not from
-`locked.amount`. For each eligible address at `SNAPSHOT_BLOCK = 25,000,000`:
+The path-2 merkle is built **off-chain from raw locked BAO** (`locked.amount`) at `SNAPSHOT_BLOCK = 25,000,000`,
+not from decaying `balanceOfAt` ve power. For each eligible address:
 
 ```
-snapshotBaoEquivalent = veBAO.balanceOfAt(addr, 25_000_000)   // BAO-equivalent voting power (wei)
-tideAmount            = baoToTide(snapshotBaoEquivalent)        // leaf amount (TIDE, rounded down)
-leaf                  = (addr, tideAmount)
+lockedBao    = veBAO.locked(addr).amount at block 25_000_000   // raw locked BAO (wei), via archive/indexer
+tideAmount   = baoToTide(lockedBao)                             // leaf amount (TIDE, rounded down)
+leaf         = (addr, tideAmount)
 ```
 
-On-chain, `claimVeBao` reverses this with `tideToBao(tideAmount)` and verifies the live position still backs it:
+On-chain, `claimVeBao` verifies the live position still backs the claim:
 
 | Field | Example value | Notes |
 |---|---|---|
-| `balanceOfAt(addr, 25_000_000)` | `6586818040368388438091638` (≈ 6,586,818 BAO-eq) | merkle input |
-| `tideAmount` (leaf) | `1157962611496762687416509` (≈ 1,157,962 TIDE) | `baoToTide(snapshot)`, paid on claim |
-| `locked(addr).amount` | ≈ 8,439,555 BAO | raw locked BAO, always `>=` snapshot for an intact lock |
+| `locked(addr).amount` at snapshot | `10000000000000000000000000` (10m BAO) | merkle input (off-chain) |
+| `tideAmount` (leaf) | `1758000000000000000000000` (1.758m TIDE) | `baoToTide(lockedBao)`, paid on claim |
+| `locked(addr).amount` at claim | must be `>= tideToBao(tideAmount)` | live anti-withdraw check |
 | `locked(addr).end` | must be `> endDate` | extend the lock on veBAO if needed |
 
 **The off-chain merkle builder MUST use the exact same `baoToTide` / `tideToBao` rounding as the contract.**
+veBAO has no `lockedAt(block)` on-chain — the merkle root caps each user's max TIDE from the off-chain snapshot;
+the live `locked.amount` check ensures they have not withdrawn below what they are claiming.
 
 ## Path 2 eligibility rules (in `claimVeBao`)
 
-1. `block.number >= SNAPSHOT_BLOCK` — `balanceOfAt` must be defined (`SnapshotNotReached`).
+1. `block.number >= SNAPSHOT_BLOCK` — claims only after the snapshot block (`SnapshotNotReached`).
 2. `block.timestamp` within `[startDate, endDate)` (`ClaimNotStarted` / `ClaimEnded`).
 3. Not already claimed (`AlreadyClaimed`).
 4. Valid merkle proof for `(msg.sender, tideAmount)` (`InvalidProof`).
 5. `locked__end(msg.sender) > endDate` — lock must extend strictly past the window (`LockEndTooEarly`).
-6. `balanceOfAt(msg.sender, SNAPSHOT_BLOCK) >= tideToBao(tideAmount)` — snapshot covers the allocation
-   (`InsufficientSnapshotBalance`).
-7. `locked(msg.sender).amount >= balanceOfAt(msg.sender, SNAPSHOT_BLOCK)` — the live lock still backs the
-   snapshot (`LockBelowSnapshot`).
-8. Shared pool cap (`TideSwapVeCapExceeded`) and TIDE balance (`InsufficientBalance`).
+6. `locked(msg.sender).amount >= tideToBao(tideAmount)` — current locked BAO covers the merkle allocation
+   (`InsufficientLocked`).
+7. Shared pool cap (`TideSwapVeCapExceeded`) and TIDE balance (`InsufficientBalance`).
 
 ### Intentional behaviors (not bugs)
 
-- `locked.amount > snapshot` is **allowed** (e.g. the user added BAO after the snapshot).
-- A **partial** withdraw where `locked.amount` is still `>= snapshot` is **allowed** — the position still backs
-  the snapshot.
-- The only thing rule 7 blocks is withdrawing **below** the snapshot, which would let someone free BAO and use it
-  again on path 1. Using path 1 and/or path 3 **in addition to** path 2 is allowed by design.
+- `locked.amount > tideToBao(tideAmount)` is **allowed** (e.g. the user added BAO after the snapshot).
+- A **partial** withdraw where `locked.amount` is still `>= tideToBao(tideAmount)` is **allowed** — enough BAO
+  remains locked to back the claim.
+- The only thing rule 6 blocks is withdrawing **below** the BAO equivalent of the merkle allocation, which would
+  let someone free BAO and use it again on path 1. Using path 1 and/or path 3 **in addition to** path 2 is
+  allowed by design.
 
 `getVeClaimStatus(user, tideAmount)` returns a read-only preview (`VeClaimStatus`) mirroring every check above
 except the merkle proof, so frontends and the contract share the same rules. Lock extension is a **frontend**
@@ -150,10 +151,10 @@ deploy (immutable config) -> fund up to 280m TIDE -> claim window (paths 1/2/3) 
 ## Funding checklist
 
 1. Deploy the TIDE token.
-2. `forge create` `HarborTideDistributor_v1` (see `script/deploy_harbor_tide.sh`) with token/veBAO addresses,
-   `startDate`/`endDate` (after block 25M), `snapshotBlock = 25_000_000`, multisig, and both merkle roots.
+2. Copy `deployments/deploy-config.example.json` to `deployments/deploy-config.json` and fill in token
+   addresses, claim window, and merkle roots. Then run `script/deploy.sh --network mainnet`.
 3. Fund with up to **280,000,000 TIDE** (<= 250m shared for paths 1+2, <= 30m for path 3).
 4. Publish the merkle trees — leaves `(address, tideAmount)` in TIDE; path 2 derives `tideAmount` from
-   `balanceOfAt(addr, 25_000_000)` via `baoToTide` (identical rounding to the contract).
+   `locked(addr).amount` at block 25_000_000 via `baoToTide` (identical rounding to the contract).
 5. Communicate to veBAO users: claim during `[startDate, endDate)` after block 25M, ensure
-   `locked__end > endDate`, and keep `locked.amount >= snapshot`. Paths 1/3 may be used on the same address.
+   `locked__end > endDate`, and keep `locked.amount >= tideToBao(yourLeafAmount)`. Paths 1/3 may be used on the same address.
