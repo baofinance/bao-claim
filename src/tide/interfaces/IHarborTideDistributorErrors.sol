@@ -15,7 +15,7 @@ interface IHarborTideDistributorErrors {
     error ClaimEnded();
     /// @notice The claim window is not over yet (sweep/recovery only after `endDate`).
     error ClaimNotOver();
-    /// @notice Configuration is locked because `block.timestamp >= startDate` (immutable after window opens).
+    /// @notice Configuration is locked (`block.timestamp >= endDate` for standard root; `>= startDate` for ve root / multisig).
     error ConfigLocked();
     /// @notice The veBAO snapshot block has not been reached (`block.number < SNAPSHOT_BLOCK`).
     error SnapshotNotReached();

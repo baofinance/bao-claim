@@ -19,9 +19,11 @@ import {IVotingEscrow} from "@tide/interfaces/IVotingEscrow.sol";
 ///         veBAO positions, (3) `claimStandard` merkle-claims TIDE for a standard allocation. Paths 1+2 share a
 ///         250m TIDE cap; path 3 has a separate 30m TIDE cap. See `src/tide/README.md` for the full architecture,
 ///         conversion math, merkle leaf format, and threat model.
-/// @dev Non-upgradeable: all economics are immutable/constant and set at deploy; only merkle roots and the
-///      multisig may change, and only before `startDate`. The `_v1` suffix is a naming convention (harbor style),
-///      not an upgradeable implementation slot. BAO is never held — it is forwarded to the multisig on each swap.
+/// @dev Non-upgradeable: all economics are immutable/constant and set at deploy; the veBAO merkle root and
+///      multisig may change only before `startDate`. The standard merkle root may be updated until `endDate`
+///      so the allocation tree can be expanded as it is finalized (`hasClaimedStandard` still enforces one claim).
+///      The `_v1` suffix is a naming convention (harbor style), not an upgradeable implementation slot.
+///      BAO is never held — it is forwarded to the multisig on each swap.
 ///      Standard ERC20 only (no fee-on-transfer / rebasing handling).
 ///      Acknowledged: path-1 swaps round TIDE down (`baoToTide`), so up to a sub-wei (<1 wei TIDE) of value per swap
 ///      is intentionally not credited (dust). This is accepted by design and is never refunded; the `MIN_TIDE_OUT`
@@ -40,7 +42,7 @@ contract HarborTideDistributor_v1 is
                                 CONSTANTS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Role allowed to update merkle roots before `startDate` (owner also allowed).
+    /// @notice Role allowed to update merkle roots (ve: before `startDate`; standard: before `endDate`).
     uint256 public constant CONFIG_ROLE = _ROLE_0;
 
     /// @notice Maximum BAO convertible via path 1 (1,422,000,000 BAO).
@@ -120,9 +122,15 @@ contract HarborTideDistributor_v1 is
                                MODIFIERS
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Restricts configuration to before the window opens; immutable thereafter.
+    /// @dev Restricts configuration to before the window opens; ve root / multisig only.
     modifier beforeStart() {
         if (block.timestamp >= startDate) revert ConfigLocked();
+        _;
+    }
+
+    /// @dev Standard merkle root may be updated any time before the window closes.
+    modifier beforeEnd() {
+        if (block.timestamp >= endDate) revert ConfigLocked();
         _;
     }
 
@@ -280,7 +288,7 @@ contract HarborTideDistributor_v1 is
     }
 
     /*//////////////////////////////////////////////////////////////
-                            CONFIG (BEFORE START)
+                            CONFIG
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc IHarborTideDistributorConfig
@@ -290,7 +298,7 @@ contract HarborTideDistributor_v1 is
     }
 
     /// @inheritdoc IHarborTideDistributorConfig
-    function setStandardMerkleRoot(bytes32 root) external onlyOwnerOrRoles(CONFIG_ROLE) beforeStart {
+    function setStandardMerkleRoot(bytes32 root) external onlyOwnerOrRoles(CONFIG_ROLE) beforeEnd {
         standardMerkleRoot = root;
         emit StandardMerkleRootUpdated(root);
     }

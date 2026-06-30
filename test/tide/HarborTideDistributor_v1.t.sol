@@ -548,7 +548,7 @@ contract HarborTideDistributorV1Test is Test {
         dist.grantRoles(bob, configRole);
         assertTrue(dist.hasAnyRole(bob, configRole));
 
-        // the newly added config address can now update BOTH merkle roots before start
+        // the newly added config address can update both roots before start
         bytes32 newStandardRoot = keccak256("bob standard root");
         bytes32 newVeRoot = keccak256("bob ve root");
         vm.startPrank(bob);
@@ -582,10 +582,61 @@ contract HarborTideDistributorV1Test is Test {
         dist.grantRoles(bob, configRole);
         assertTrue(dist.hasAnyRole(bob, configRole));
 
-        // ...but config actions are locked once the window has opened
+        // ...but ve root updates are locked once the window has opened
         vm.prank(bob);
         vm.expectRevert(IHarborTideDistributorErrors.ConfigLocked.selector);
-        dist.setStandardMerkleRoot(keccak256("too late"));
+        dist.setVeBaoMerkleRoot(keccak256("too late for ve"));
+
+        // standard root may still be updated during the window
+        bytes32 expandedRoot = keccak256("expanded standard root");
+        vm.prank(bob);
+        dist.setStandardMerkleRoot(expandedRoot);
+        assertEq(dist.standardMerkleRoot(), expandedRoot);
+    }
+
+    function testSetStandardMerkleRootDuringWindow() public {
+        _enterWindow();
+        bytes32 newRoot = keccak256("standard root v2");
+        vm.prank(configOps);
+        dist.setStandardMerkleRoot(newRoot);
+        assertEq(dist.standardMerkleRoot(), newRoot);
+    }
+
+    function testSetStandardMerkleRootRevertsAfterEnd() public {
+        vm.warp(endDate + 1);
+        vm.prank(configOps);
+        vm.expectRevert(IHarborTideDistributorErrors.ConfigLocked.selector);
+        dist.setStandardMerkleRoot(keccak256("after end"));
+    }
+
+    function testStandardRootUpdateAllowsNewClaimers() public {
+        _enterWindow();
+        vm.prank(alice);
+        dist.claimStandard(STD_TIDE, _emptyProof());
+        assertTrue(dist.hasClaimedStandard(alice));
+
+        bytes32 bobRoot = _leaf(bob, STD_TIDE);
+        vm.prank(configOps);
+        dist.setStandardMerkleRoot(bobRoot);
+
+        vm.prank(bob);
+        dist.claimStandard(STD_TIDE, _emptyProof());
+        assertEq(tide.balanceOf(bob), STD_TIDE);
+        assertTrue(dist.hasClaimedStandard(bob));
+    }
+
+    function testStandardRootUpdateDoesNotAllowDoubleClaim() public {
+        _enterWindow();
+        vm.prank(alice);
+        dist.claimStandard(STD_TIDE, _emptyProof());
+
+        bytes32 higherRoot = _leaf(alice, STD_TIDE + 1);
+        vm.prank(configOps);
+        dist.setStandardMerkleRoot(higherRoot);
+
+        vm.prank(alice);
+        vm.expectRevert(IHarborTideDistributorErrors.AlreadyClaimed.selector);
+        dist.claimStandard(STD_TIDE + 1, _emptyProof());
     }
 
     function testNonOwnerCannotGrantConfigRole() public {
@@ -604,7 +655,7 @@ contract HarborTideDistributorV1Test is Test {
         assertFalse(dist.hasAnyRole(bob, configRole));
     }
 
-    function testSetRootRevertsAfterStart() public {
+    function testSetVeBaoMerkleRootRevertsAfterStart() public {
         _enterWindow();
         vm.prank(multisig);
         vm.expectRevert(IHarborTideDistributorErrors.ConfigLocked.selector);

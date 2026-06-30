@@ -3,7 +3,8 @@ pragma solidity 0.8.30;
 
 /// @title IHarborTideDistributorConfig
 /// @notice Owner / `CONFIG_ROLE` governance API for {HarborTideDistributor_v1}.
-/// @dev Merkle roots and the multisig may only be updated before `startDate`. Sweep and recovery are
+/// @dev The veBAO merkle root and multisig may only be updated before `startDate`. The standard merkle root may
+///      be updated until `endDate` (one claim per address is still enforced on-chain). Sweep and recovery are
 ///      owner-only and only callable after `endDate`. Dates, caps, rate, and token addresses are immutable.
 interface IHarborTideDistributorConfig {
     /*//////////////////////////////////////////////////////////////
@@ -14,7 +15,7 @@ interface IHarborTideDistributorConfig {
     /// @param root The new veBAO merkle root.
     event VeBaoMerkleRootUpdated(bytes32 root);
 
-    /// @notice Emitted when the standard merkle root is updated (before `startDate`).
+    /// @notice Emitted when the standard merkle root is updated (before `endDate`).
     /// @param root The new standard merkle root.
     event StandardMerkleRootUpdated(bytes32 root);
 
@@ -40,7 +41,7 @@ interface IHarborTideDistributorConfig {
     /// @param root The new veBAO merkle root.
     function setVeBaoMerkleRoot(bytes32 root) external;
 
-    /// @notice Sets the path-3 standard merkle root. Owner or `CONFIG_ROLE`, before `startDate` only.
+    /// @notice Sets the path-3 standard merkle root. Owner or `CONFIG_ROLE`, before `endDate` only.
     /// @param root The new standard merkle root.
     function setStandardMerkleRoot(bytes32 root) external;
 

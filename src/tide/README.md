@@ -117,7 +117,8 @@ action against veBAO directly (`create_lock` / `increase_unlock_time`) — the d
 
 | Action | Who | When |
 |---|---|---|
-| `setVeBaoMerkleRoot`, `setStandardMerkleRoot` | owner or `CONFIG_ROLE` | **before `startDate` only** |
+| `setVeBaoMerkleRoot` | owner or `CONFIG_ROLE` | **before `startDate` only** |
+| `setStandardMerkleRoot` | owner or `CONFIG_ROLE` | **before `endDate` only** (expand tree during window) |
 | `setMultisig` | owner only | **before `startDate` only** |
 | `sweep` (TIDE -> multisig) | owner only | **after `endDate` only** |
 | `recoverySweep(token)` (stray tokens) | owner only | **after `endDate` only** |
@@ -133,13 +134,15 @@ action against veBAO directly (`create_lock` / `increase_unlock_time`) — the d
 ## Threat model
 
 - **No upgrades.** Bytecode is final; the owner cannot change logic, dates, caps, or rate post-deploy.
-- **Roots/multisig frozen at window open.** Nothing an admin can do during or after the window affects claim
-  outcomes — late root changes are impossible (`ConfigLocked`), and sweep only runs after `endDate`.
+- **ve root frozen at window open; standard root expandable until close.** The veBAO merkle root and multisig lock
+  at `startDate`. The standard merkle root may still be updated during `[startDate, endDate)` so the allocation
+  tree can grow as it is finalized — each address remains one-shot via `hasClaimedStandard`. Sweep only runs after
+  `endDate`.
 - **Hard on-chain caps.** `MAX_BAO` (1,422m), `MAX_TIDE_SWAP_AND_VE` (250m), `MAX_TIDE_STANDARD` (30m) are
   enforced on every path. Off-chain merkle trees + max swap must be sized so the sums stay within these caps; the
   contract will not over-distribute regardless.
-- **No role self-grant.** `CONFIG_ROLE` can only touch merkle roots before `startDate`; sweep/recovery and role
-  management are owner-only.
+- **No role self-grant.** `CONFIG_ROLE` can update the ve root before `startDate` and the standard root before
+  `endDate`; sweep/recovery and role management are owner-only.
 - **Standard ERC20 only.** No fee-on-transfer or rebasing support — TIDE/BAO are assumed standard.
 
 ## Lifecycle
@@ -158,3 +161,27 @@ deploy (immutable config) -> fund up to 280m TIDE -> claim window (paths 1/2/3) 
    `locked(addr).amount` at block 25_000_000 via `baoToTide` (identical rounding to the contract).
 5. Communicate to veBAO users: claim during `[startDate, endDate)` after block 25M, ensure
    `locked__end > endDate`, and keep `locked.amount >= tideToBao(yourLeafAmount)`. Paths 1/3 may be used on the same address.
+
+## Testing
+
+Run **local unit + invariant tests** (no RPC):
+
+```bash
+forge test --match-path "test/tide/**" --no-match-path "test/tide/*.fork.t.sol"
+```
+
+Run **mainnet fork integration tests** separately. `MAINNET_RPC_URL` lives in `.env`, but the shell does not load it automatically — use either:
+
+```bash
+script/test-fork.sh -vv
+```
+
+or Foundry's `mainnet` alias (Forge reads `.env` for `foundry.toml`):
+
+```bash
+forge test --match-path "test/tide/HarborTideDistributor_v1.fork.t.sol" -vv --fork-url mainnet
+```
+
+To pass the URL explicitly: `source .env && forge test ... --fork-url "$MAINNET_RPC_URL"`.
+
+Keep these separate: running fork tests together with the invariant suite can hit RPC rate limits on archive nodes.

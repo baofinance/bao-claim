@@ -1,0 +1,13 @@
+{
+  "bao": "0xCe391315b414D4c7555956120461D21808A69F3A",
+  "chainId": 1,
+  "distributor": "0x1B12e5bae8be22D653D0833A70D951505d017BF9",
+  "endDate": 1783245600,
+  "multisig": "0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2",
+  "snapshotBlock": 25000000,
+  "standardMerkleRoot": "0xfdd432ab8ae9cf7629c0b184dbe31ca5e8b0ebb00e58ea63594375090bfec563",
+  "startDate": 1782857577,
+  "tide": "0xB324bA448Ac468015cB86039314ada42E198aA5c",
+  "veBao": "0x8Bf70DFE40F07a5ab715F7e888478d9D3680a2B6",
+  "veBaoMerkleRoot": "0xfdd432ab8ae9cf7629c0b184dbe31ca5e8b0ebb00e58ea63594375090bfec563"
+}
