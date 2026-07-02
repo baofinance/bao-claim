@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+pragma solidity 0.8.30;
 
-import "forge-std/Test.sol";
-import "../src/BaoClaim.sol";
-import "forge-std/console.sol";
+import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IBaoOwnable} from "@bao/interfaces/IBaoOwnable.sol";
+import {BaoClaim} from "../src/BaoClaim.sol";
 
 contract BaoClaimTest is Test {
     BaoClaim public claimContract;
     MockERC20 public token;
 
     address public multisig = address(0x3dFc49e5112005179Da613BdE5973229082dAc35);
+    address public configOps = address(0x1111);
     address public claimer = address(0xb9ab9578a34a05c86124c399735fdE44dEc80E7F);
     bytes32 public root = 0x8eabd2b36ce185476a0bda6c61aa1584dcad3b6f0ed59b5edc5d23e451f6e290;
     bytes32[] public proof;
@@ -22,6 +24,10 @@ contract BaoClaimTest is Test {
 
         claimContract = new BaoClaim(root, start, end, multisig, address(token), 10_581e18);
         token.mint(address(claimContract), initialSupply);
+
+        vm.startPrank(multisig);
+        claimContract.grantRoles(configOps, claimContract.CONFIG_ROLE());
+        vm.stopPrank();
 
         proof.push(0x60f5c088967371383ec13d554a2870a21c579acccabcf082f3af690c5c67c91f);
         proof.push(0xe71344f8df6c09b676b64d848db171be9469a3937750db0ba8c5d8f652115345);
@@ -62,7 +68,8 @@ contract BaoClaimTest is Test {
 
     function testRevertsBeforeStart() public {
         uint256 futureStart = block.timestamp + 1 days;
-        BaoClaim futureClaim = new BaoClaim(root, futureStart, futureStart + 7 days, multisig, address(token), 10_581e18);
+        BaoClaim futureClaim =
+            new BaoClaim(root, futureStart, futureStart + 7 days, multisig, address(token), 10_581e18);
         token.mint(address(futureClaim), initialSupply);
 
         vm.expectRevert(BaoClaim.ClaimNotStarted.selector);
@@ -162,6 +169,20 @@ contract BaoClaimTest is Test {
         claimContract.setClaimAmount(1_234e18);
     }
 
+    function testConfigRoleCanSetMerkleRoot() public {
+        bytes32 newRoot = keccak256("config role root");
+        vm.prank(configOps);
+        claimContract.setMerkleRoot(newRoot);
+        assertEq(claimContract.merkleRoot(), newRoot);
+    }
+
+    function testConfigRoleCannotSweep() public {
+        vm.warp(claimContract.endDate() + 1);
+        vm.prank(configOps);
+        vm.expectRevert(IBaoOwnable.Unauthorized.selector);
+        claimContract.sweep();
+    }
+
     function testGetClaimableView() public {
         (bool claimed, uint256 amount) = claimContract.getClaimable(claimer);
         assertEq(claimed, false);
@@ -171,7 +192,7 @@ contract BaoClaimTest is Test {
         vm.prank(claimer);
         claimContract.claim(proof);
 
-        (claimed, ) = claimContract.getClaimable(claimer);
+        (claimed,) = claimContract.getClaimable(claimer);
         assertEq(claimed, true);
     }
 }
