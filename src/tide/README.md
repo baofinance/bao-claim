@@ -151,11 +151,79 @@ action against veBAO directly (`create_lock` / `increase_unlock_time`) — the d
 deploy (immutable config) -> fund up to 280m TIDE -> claim window (paths 1/2/3) -> sweep leftover TIDE -> retire
 ```
 
+## Production deployment (mainnet)
+
+Live distributor: [0x7C5791e6F37d2fFdd4DAbf17d170556828C20fCD](https://etherscan.io/address/0x7c5791e6f37d2ffdd4dabf17d170556828c20fcd)  
+Canonical config: `deployments/aux-1.json`. Frontend integration: [`FRONTEND.md`](FRONTEND.md).
+
+| | Address / value |
+|---|---|
+| **Distributor** | `0x7C5791e6F37d2fFdd4DAbf17d170556828C20fCD` |
+| **TIDE** | `0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD` |
+| **BAO** | `0xCe391315b414D4c7555956120461D21808A69F3A` |
+| **veBAO** | `0x8Bf70DFE40F07a5ab715F7e888478d9D3680a2B6` |
+| **Multisig** (owner) | `0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2` |
+| **startDate** | `1782936000` — Jul 1 2026 20:00 GMT |
+| **endDate** | `1798761600` — Jan 1 2027 00:00 UTC *(exclusive; claims through Dec 31 2026)* |
+| **SNAPSHOT_BLOCK** | `25000000` |
+| **veBaoMerkleRoot** | `0xfdd432ab8ae9cf7629c0b184dbe31ca5e8b0ebb00e58ea63594375090bfec563` *(frozen at `startDate`)* |
+| **standardMerkleRoot** | `0x2e14222f9f0754e9b48f6a55034024aacc72539ac4d3848a2836a0d1c30e2b31` *(set via `setStandardMerkleRoot` after deploy)* |
+
+Deployed with an empty standard root (`0x0`); the multisig set the live standard root above during the claim window.
+Read `standardMerkleRoot()` on-chain before enabling path 3 in a frontend.
+
+### Merkle data (separate trees)
+
+Paths 2 and 3 use **different** merkle roots and allocation files. Same leaf format `(address, tideAmount)`; do not
+mix proofs across paths.
+
+| Path | Function | Off-chain data | Pool |
+|---|---|---|---|
+| 2 — veBAO | `claimVeBao` | `vebao_tide_allocation.json` | ~85m TIDE (846 addresses; within 250m shared cap with path 1) |
+| 3 — standard (veFXN) | `claimStandard` | `vefxn_tide_allocation.json` | 30m TIDE (683 addresses; `MAX_TIDE_STANDARD`) |
+
+Path 2 `tideAmount` per address: `baoToTide(locked.amount)` at block 25_000_000. Path 3: pro-rata by aggregated
+veFXN weight at the same snapshot (floor division; see `vefxn_tide_allocation.json` metadata).
+
+### Path 3 eligibility (standard / veFXN)
+
+Unlike path 2, `claimStandard` has **no veBAO checks** — only:
+
+1. `block.timestamp` within `[startDate, endDate)`
+2. Not already claimed (`hasClaimedStandard`)
+3. Valid merkle proof for `(msg.sender, tideAmount)` vs `standardMerkleRoot`
+4. Path cap (`MAX_TIDE_STANDARD`) and distributor TIDE balance
+
+Same address may claim path 2 and path 3 if present in both trees.
+
+### Launch checklist
+
+| Step | Status |
+|---|---|
+| Deploy distributor | Done |
+| Set `standardMerkleRoot` | Done (`0x2e14222…`) |
+| Fund **280,000,000 TIDE** to distributor | **Required before payouts** — claims revert `InsufficientBalance` until funded |
+| Publish allocation JSON + frontend | Use separate files per path; see [`FRONTEND.md`](FRONTEND.md) |
+| veBAO users extend lock past Dec 31 2026 | Required for path 2 only (`locked__end > endDate`) |
+
+Fork tests target this contract (`script/test-fork.sh`); they `deal` TIDE in `setUp` for integration coverage.
+
+### Legacy test deployment
+
+| | Address / value |
+|---|---|
+| **Distributor** | `0x1B12e5bae8be22D653D0833A70D951505d017BF9` |
+| **TIDE** (test token `NOTIDE`) | `0xB324bA448Ac468015cB86039314ada42E198aA5c` |
+| **Claim window** | Short test window (Jul 2026) |
+
 ## Funding checklist
+
+For **new** deployments (not the live production contract above):
 
 1. Production **TIDE** on mainnet: `0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD` (Harbor Tide / `TIDE`, 18 decimals).
 2. Copy `deployments/deploy-config.example.json` to `deployments/deploy-config.json` and fill in token
    addresses, claim window, and merkle roots. Then run `script/deploy.sh --network mainnet`.
+   `standardMerkleRoot` may be `0x0` at deploy — set via `setStandardMerkleRoot` before path 3 goes live.
 3. Fund with up to **280,000,000 TIDE** (<= 250m shared for paths 1+2, <= 30m for path 3).
 4. Publish the merkle trees — leaves `(address, tideAmount)` in TIDE; path 2 derives `tideAmount` from
    `locked(addr).amount` at block 25_000_000 via `baoToTide` (identical rounding to the contract).

@@ -44,7 +44,7 @@ Use this address in `deployments/deploy-config.json` for production distributor 
 | **veBAO** | `0x8Bf70DFE40F07a5ab715F7e888478d9D3680a2B6` |
 | **Multisig** (owner) | `0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2` |
 | **veBao merkle root** | `0xfdd432ab8ae9cf7629c0b184dbe31ca5e8b0ebb00e58ea63594375090bfec563` *(frozen at `startDate`)* |
-| **Standard merkle root** | `0x0` at deploy — set via `setStandardMerkleRoot` before path 3 goes live |
+| **Standard merkle root** | `0x2e14222f9f0754e9b48f6a55034024aacc72539ac4d3848a2836a0d1c30e2b31` *(veFXN tree; set after deploy via `setStandardMerkleRoot`)* |
 | **Claim window** | Jul 1 2026 20:00 GMT → Dec 31 2026 (via `startDate` / `endDate`) |
 
 Fork tests target this contract (`script/test-fork.sh`); they `deal` TIDE and set standard root in `setUp` for integration coverage.
@@ -239,7 +239,8 @@ Optional detail line:
    - claimVeBao(tideAmount, proof)
 
    STANDARD CLAIM:
-   - Load (tideAmount, proof) from backend
+   - Load (tideAmount, proof) from `vefxn_tide_allocation.json` (or API mirroring it)
+   - Check `standardMerkleRoot() !== 0` and matches published root
    - Check !hasClaimedStandard(user)
    - claimStandard(tideAmount, proof)
 ```
@@ -287,8 +288,8 @@ Frontend should fetch per user from your API:
 }
 ```
 
-- **Path 2 tree:** built from `locked.amount` at block **25_000_000**, converted via `baoToTide`
-- **Path 3 tree:** separate standard allocation
+- **Path 2 tree:** `vebao_tide_allocation.json` — built from `locked.amount` at block **25_000_000**, converted via `baoToTide`
+- **Path 3 tree:** `vefxn_tide_allocation.json` — pro-rata veFXN weight at block **25_000_000** (30m TIDE pool)
 - Use **identical** `baoToTide` / `tideToBao` rounding as the contract
 
 Example test allocation (for fork/integration tests):
@@ -305,7 +306,7 @@ Example test allocation (for fork/integration tests):
 3. **Lock extension** is done on **veBAO directly**, not the distributor.
 4. **Approve BAO** to distributor before swap (`convertBao`).
 5. **TIDE amount in calldata must match proof exactly** — no partial claims.
-6. **Test deployment** uses same merkle root for both paths — production will use separate roots.
+6. **Production uses separate merkle roots** for veBAO (path 2) and veFXN standard (path 3) — do not reuse proofs across paths.
 7. Contract is **not upgradeable** — address and rules are final after deploy.
 
 ---
