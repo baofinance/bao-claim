@@ -153,7 +153,7 @@ deploy (immutable config) -> fund up to 280m TIDE -> claim window (paths 1/2/3) 
 
 ## Funding checklist
 
-1. Deploy the TIDE token.
+1. Production **TIDE** on mainnet: `0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD` (Harbor Tide / `TIDE`, 18 decimals).
 2. Copy `deployments/deploy-config.example.json` to `deployments/deploy-config.json` and fill in token
    addresses, claim window, and merkle roots. Then run `script/deploy.sh --network mainnet`.
 3. Fund with up to **280,000,000 TIDE** (<= 250m shared for paths 1+2, <= 30m for path 3).

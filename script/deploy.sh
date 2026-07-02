@@ -67,12 +67,16 @@ command -v jq >/dev/null 2>&1 || { echo "❌ jq is required" >&2; exit 1; }
 
 # Validate required config fields before broadcasting.
 missing=()
-for key in tide bao startDate endDate veBaoMerkleRoot standardMerkleRoot; do
+for key in tide bao startDate endDate veBaoMerkleRoot; do
   val=$(jq -r --arg k "$key" '.[$k] // empty' "$CONFIG_PATH")
   if [[ -z "$val" || "$val" == "null" || "$val" == "0x0000000000000000000000000000000000000000" || "$val" == "0" ]]; then
   missing+=("$key")
   fi
 done
+std_root=$(jq -r '.standardMerkleRoot // empty' "$CONFIG_PATH")
+if [[ -z "$std_root" || "$std_root" == "null" ]]; then
+  missing+=("standardMerkleRoot")
+fi
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "❌ Missing or placeholder values in $CONFIG_PATH: ${missing[*]}" >&2
   exit 1

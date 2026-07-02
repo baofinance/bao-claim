@@ -36,9 +36,8 @@ contract DeployTideDistributor is Script {
 
         require(cfg.tide != address(0) && cfg.bao != address(0), "config: tide and bao required");
         require(cfg.startDate > 0 && cfg.endDate > cfg.startDate, "config: startDate and endDate required");
-        require(
-            cfg.veBaoMerkleRoot != bytes32(0) && cfg.standardMerkleRoot != bytes32(0), "config: merkle roots required"
-        );
+        require(cfg.veBaoMerkleRoot != bytes32(0), "config: veBaoMerkleRoot required");
+        // standardMerkleRoot may be zero at deploy — set via setStandardMerkleRoot before endDate.
 
         vm.startBroadcast();
         HarborTideDistributor_v1 distributor = new HarborTideDistributor_v1(

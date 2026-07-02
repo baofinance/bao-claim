@@ -14,12 +14,49 @@ User-facing interface: [`interfaces/IHarborTideDistributor.sol`](interfaces/IHar
 
 ---
 
-## Current deployment (mainnet test)
+## Production TIDE token (mainnet)
+
+| | |
+|---|---|
+| **TIDE** | `0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD` |
+| **Name / symbol** | Harbor Tide / `TIDE` |
+| **Decimals** | 18 |
+| **Total supply** | 1,000,000,000 TIDE |
+
+Use this address in `deployments/deploy-config.json` for production distributor deploys. The distributor pays this token on all three paths.
+
+**Planned production claim window** (`deploy-config.json`):
+
+| | Timestamp | Time (UTC) |
+|---|---|---|
+| **startDate** | `1782936000` | Jul 1, 2026 20:00 GMT |
+| **endDate** | `1798761600` | Jan 1, 2027 00:00 GMT *(exclusive — includes all of Dec 31, 2026)* |
+
+---
+
+**Production distributor (mainnet):** [0x7C5791e6F37d2fFdd4DAbf17d170556828C20fCD](https://etherscan.io/address/0x7c5791e6f37d2ffdd4dabf17d170556828c20fcd)
+
+| | Address / value |
+|---|---|
+| **Distributor** | `0x7C5791e6F37d2fFdd4DAbf17d170556828C20fCD` |
+| **TIDE** | `0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD` |
+| **BAO** | `0xCe391315b414D4c7555956120461D21808A69F3A` |
+| **veBAO** | `0x8Bf70DFE40F07a5ab715F7e888478d9D3680a2B6` |
+| **Multisig** (owner) | `0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2` |
+| **veBao merkle root** | `0xfdd432ab8ae9cf7629c0b184dbe31ca5e8b0ebb00e58ea63594375090bfec563` *(frozen at `startDate`)* |
+| **Standard merkle root** | `0x0` at deploy — set via `setStandardMerkleRoot` before path 3 goes live |
+| **Claim window** | Jul 1 2026 20:00 GMT → Dec 31 2026 (via `startDate` / `endDate`) |
+
+Fork tests target this contract (`script/test-fork.sh`); they `deal` TIDE and set standard root in `setUp` for integration coverage.
+
+---
+
+## Legacy test deployment
 
 | | Address / value |
 |---|---|
 | **Distributor** | `0x1B12e5bae8be22D653D0833A70D951505d017BF9` |
-| **TIDE** (test token) | `0xB324bA448Ac468015cB86039314ada42E198aA5c` |
+| **TIDE** (test token `NOTIDE`) | `0xB324bA448Ac468015cB86039314ada42E198aA5c` |
 | **BAO** | `0xCe391315b414D4c7555956120461D21808A69F3A` |
 | **veBAO** | `0x8Bf70DFE40F07a5ab715F7e888478d9D3680a2B6` |
 | **Multisig** (owner) | `0x9bABfC1A1952a6ed2caC1922BFfE80c0506364a2` |
@@ -124,10 +161,53 @@ struct VeClaimStatus {
 
 **Not used:** `balanceOfAt` / ve power — merkle is built from **raw locked BAO at snapshot block 25M** off-chain.
 
+Data source: `harbor-app/public/data/tide/vebao_tide_allocation.json` (846 addresses, `merkleRoot` matches `veBaoMerkleRoot`).
+
+#### veBAO lock must extend past **31 December 2026** (production)
+
+Production `endDate` is **1 Jan 2027 00:00 UTC** (exclusive). Claims are allowed through **31 Dec 2026 23:59:59 UTC**.
+
+On-chain rule: `locked__end(user) > endDate` — the lock must end **strictly after** the distributor window, i.e. **into 2027**.
+
+Many users are in the merkle tree but have `lockedEnd` in the JSON **before** that deadline. They **cannot claim** until they extend on veBAO, even with a valid proof.
+
+**UI must check at claim time (not only JSON snapshot):**
+
+```typescript
+const endDate = await distributor.endDate();
+const status = await distributor.getVeClaimStatus(user, tideAmount);
+
+// Authoritative on-chain read (prefer over JSON lockedEnd)
+const lockOk = status.veEnd > endDate;
+```
+
+**When `status.veEnd <= endDate` (or JSON `lockedEnd` ≤ endDate as a pre-check), show:**
+
+> **Extend your veBAO lock**  
+> Your lock must end **after 31 December 2026** to claim TIDE.  
+> Extend your lock on [veBAO](https://…/) so it runs past the claim window, then return here to claim.
+
+Optional detail line:
+
+> Your lock currently ends: {formatDate(status.veEnd)} · Required: after {formatDate(endDate)} ({formatDate(status.minUnlockTime)} or later)
+
+**CTA:** Link/button to veBAO lock extension (`increase_unlock_time` / `create_lock`) — the distributor never writes to veBAO.
+
+**Do not enable the claim button** when `!status.canClaimNow` because of lock timing — the tx will revert with `LockEndTooEarly`.
+
+**Other ve claim blockers (show similarly):**
+
+| Check | User message |
+|---|---|
+| `status.lockedAmount < status.baoRequired` | Keep at least {baoRequired} BAO locked on veBAO (do not withdraw below your allocation). |
+| `status.alreadyClaimed` | You have already claimed your veBAO TIDE allocation. |
+| `!status.poolCapAvailable` | veBAO claim pool cap reached — try again later. |
+| Before `startDate` / after `endDate` | Claim window closed (opens {startDate}, closes 31 Dec 2026). |
+
 **Frontend actions for ineligible ve users:**
 
-- Extend lock on veBAO: `locked__end > endDate` (hint: `minUnlockTime = endDate + 1`)
-- Ensure locked BAO ≥ `baoRequired`
+- Extend lock on veBAO so `locked__end > endDate` (must be **after 31 Dec 2026** for production)
+- Ensure locked BAO ≥ `baoRequired` at the moment they claim
 
 ### Path 3 — standard claim
 
@@ -151,9 +231,11 @@ struct VeClaimStatus {
    - Approve BAO → convertBao
 
    ve CLAIM:
-   - Load (tideAmount, proof) from backend/merkle API
+   - Load (tideAmount, proof) from vebao_tide_allocation.json (or API mirroring it)
    - getVeClaimStatus(user, tideAmount)
-   - If !canClaimNow → show why (lock too short, insufficient locked, already claimed, etc.)
+   - If status.veEnd <= endDate → show "Extend lock past 31 Dec 2026" + link to veBAO
+   - If status.lockedAmount < status.baoRequired → show insufficient locked BAO
+   - If !canClaimNow → show specific blocker; disable claim button
    - claimVeBao(tideAmount, proof)
 
    STANDARD CLAIM:
@@ -183,7 +265,7 @@ struct VeClaimStatus {
 | `AlreadyClaimed` | Second claim on same path |
 | `InvalidProof` | Wrong proof or wrong `tideAmount` |
 | `BelowMinSwap` | Swap too small |
-| `LockEndTooEarly` | ve lock ends at/before `endDate` |
+| `LockEndTooEarly` | ve lock ends on or before 31 Dec 2026 — extend veBAO lock past the claim window |
 | `InsufficientLocked` | Locked BAO below `tideToBao(tideAmount)` |
 | `InsufficientBalance` | Distributor out of TIDE |
 | `TideSwapVeCapExceeded` / `TideStandardCapExceeded` | Pool cap hit |
@@ -286,4 +368,4 @@ forge test --match-path "test/tide/**" --no-match-path "test/tide/*.fork.t.sol"
 
 ## Production note
 
-Production deploy will use a new distributor address, real TIDE token, separate merkle roots, and final claim window dates. Update frontend config when going live.
+Production distributor deploys use **production TIDE** (`0xDA187eB6F4D7eE3a0b8f5cd81eED8d347f5693aD`), a new distributor address, production merkle roots, and final claim window dates. Read `TIDE()` from the deployed distributor — do not assume the test fork address.
